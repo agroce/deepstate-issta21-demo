@@ -24,6 +24,8 @@
 %% The first command in your LaTeX source must be the \documentclass command.
 \documentclass[sigconf]{acmart}
 
+\usepackage{code}
+\hypersetup{draft}
 %%
 %% \BibTeX command to typeset BibTeX logo in the docs
 \AtBeginDocument{%
@@ -88,6 +90,9 @@
 \author{Peter Goodman}
 \author{Gustavo Grieco}
 \affiliation{\institution{Trail of Bits}\country{United States}}
+\author{Alan Cao}
+\affiliation{\institution{New York University}\country{United States}}
+
 
 
 %%
@@ -96,7 +101,7 @@
 %% other information printed in the page headers. This command allows
 %% the author to define a more concise list
 %% of authors' names for this purpose.
-\renewcommand{\shortauthors}{Groce, Goodman, and Grieco}
+\renewcommand{\shortauthors}{Groce, Goodman, Grieco, and Cao}
 
 %%
 %% The abstract is a short summary of the work to be presented in the
@@ -130,10 +135,99 @@ Almost every software developer knows how to write a unit test; very few softwar
 
 \section{Introduction}
 
+Automated test generation using sophisticated methods, including fuzzers and symbolic execution, has the potential to greatly improve the reliability, safety, and security of software systems.  Unfortunately, few real-world developers have any experience using such tools, and the widely differing ways test harnesses must be written \cite{WODACommon} and tools must be run limit knowledge transfer from one tool to another.  DeepState \cite{goodman2018deepstate} provides a single front-end that allows a developer to \emph{write a single parameterized unit test} \cite{ParamUnit}  and then use a variety of fuzzers and/or symbolic execution tools to generate test cases in a single, shared, binary format.  DeepState has been used in internal security audits at Trail of Bits, and to detect bugs in real-world code (\url{https://github.com/Blosc/c-blosc2/issues/95}, \url{https://github.com/laurynas-biveinis/unodb}, \url{https://github.com/RoaringBitmap/CRoaring}); DeepState is being used in various non-public testing efforts, as well.
+
 \section{A Simple Example}
 
-\section{Supported Fuzzers}
+\begin{figure}
+{\scriptsize
+\begin{code}
+\#include <deepstate/DeepState.hpp>
+using namespace deepstate;
+
+\#include  "runlen.h"
+
+// This can be much higher for fuzzing, but should be small for
+// symbolic execution to scale
+\#define MAX\_STR\_LEN 6
+
+TEST(Runlength, EncodeDecode) \{
+  char* original = DeepState\_CStrUpToLen(MAX\_STR\_LEN,
+                                         "abcdef0123456789");
+  char* encoded = encode(original);
+  ASSERT\_LE(strlen(encoded), strlen(original)*2) <<
+   "Encoding is > length*2!";
+  char* roundtrip = decode(encoded);
+  ASSERT\_EQ(strncmp(roundtrip, original, MAX\_STR\_LEN), 0) <<
+    "ORIGINAL: '" << original << "', ENCODED: '" << encoded <<
+    "', ROUNDTRIP: '" << roundtrip << "'";
+\}
+\end{code}
+}
+  \caption{A Simple DeepState Test Harness}
+  \label{fig:example}
+  \end{figure}
+
+\begin{figure}
+{\scriptsize
+\begin{code}
+
+\end{code}
+}
+  \caption{A Simple DeepState Test Harness}
+  \label{fig:example}
+  \end{figure}
 
 
+A major feature of the DeepState API not shown in this simple example is the {\tt OneOf} construct, which takes as parameter a vector, array, string, or an arbitrary number of C++ lambdas.  In the first three cases, it returns a nondetermnistic element of the sequence; for lambdas, it selects and executes one of the code choices.  This makes the basic ``choose and run one option'' structure of API call sequence testing trivial to implement.  For an extended example of this in use see \url{https://github.com/agroce/testleveldb/blob/master/DiffTestDBs.cpp}, a DeepState harness for differential testing of Google's leveldb and Facebook's rocksdb.
+  
+\section{Supported Fuzzers and Back Ends}
+
+DeepState includes full-featured front-ends for libFuzzer, afl \cite{aflfuzz}, libFuzzer, Eclipser \cite{choi:icse:2019}, Angora \cite{chen2018angora}, and Honggfuzz (\url{https://github.com/google/honggfuzz}), as well as a built-in, extremely fast dumb fuzzer for quick discovery of some bugs.  It also, using the same interface, allows users to generate tests via symbolic execution using Manticore \cite{mossberg2019manticore}, as noted above.
+
+In addition, DeepState can interface with any fuzzer that allows fuzzing via either file inputs or stdin, which means, in practice, the majority of fuzzers that are being developed now.  If a fuzzer is similar in interface to a fully-supported fuzzer (e.g., afl, the basis for many fuzzer variants), then writing and submitting a first-class interface is usually trivial.
+
+\section{More Than A Front-End}
+
+\subsection{Swarm Testing}
+
+Swarm testing \cite{ISSTA12} is a low-cost, high-impact approach to improving test generation, widely used in compiler testing \cite{} and as a foundation for the test approach for FoundationDB, the back-end database for Apple and Snowflake cloud services\cite{zhou2021foundationdb}.  Heretofore, no fuzzers to our knowledge have included support for swarm testing, which operates by constructing tests that universally omit some options in repeated choices (e.g. among API calls or options).  The swarm testing concept aligns perfectly with DeepState's {\tt OneOf} construct, and DeepState allows the use of swarm testing with any fuzzer, simply by compiling the DeepState harness with the swarm option enabled.  The impact can be extremely large.  For example, finding the simple stack overflow in \url{https://github.com/agroce/deepstate-stack} requires less than one second using afl, libFuzzer, or even DeepState's built-in dumb fuzzer, using swarm testing, but an average of over an hour to detect with afl when not using swarm testing, and (we estimate) trillions of years with the brute-force fuzzer not using swarm testing.  A core goal of DeepState is to enable the exploration and use of test generation strategies that do not need to be implemented in individual fuzzers, but operate on a more semantic level.
+
+\subsection{State-of-the-Art Test Reduction}
+
+\subsection{Ensemble Fuzzing}
+
+Ensemble fuzzing \cite{chen2019enfuzz} extends the idea of ensemble learning, where multiple machine learning methods are applied to a problem, given the unpredictable diversity of performance of methods, to the fuzzing problem.  DeepState supports automatic cooperative fuzzing, using tests generated by one fuzzer to seed another.  The best known other implementation of ensemble fuzzing (\url{http://wingtecher.com/Enfuzz} requires uploading source code to a web site, supports a more limited set of fuzzers than DeepState (lacking Eclipser and Angora), and requires use of the very limited API of a standard libFuzzer char buffer interface to fuzzing.  DeepState in contrast lets users write parameterized unit tests as usual, but then use any fuzzers DeepState provides for cooperative fuzzing.
+
+\subsubsection{Experimental Evaluation}
+
+\begin{table}
+\centering
+\begin{tabular}{l|r|r}
+ & Runlen & TweetNaCl Bug \\
+  Fuzzer & Mean Crash Time & Mean Crash Time \\
+  \hline
+  {\bf Ensembler} & 3.29s & 4m13s \\
+  afl & 7.01s & 3m 39s \\
+  libFuzzer & 4.05s & 4m 19s \\
+  Angora & 7.06s & 10m 47s \\
+  Eclipser & 2.74s & 12m 45s \\
+\end{tabular}
+\caption{Ensemble fuzzing experiments}
+\label{tab:ensemble}
+\end{table}
+
+Table~\ref{tab:ensemble} shows, for simple examples, some of the benefits of the ensembler.  The first example, Runlen, is the DeepState example included in the distribution and discussed above.  The second is a real-world bignum vulnerability \url{http://seb.dbzteam.org/blog/2014/04/28/tweetnacl_arithmetic_bug.html\#fn:2}.  In addition to the benefits described in the academic literature, where cooperative fuzzing can find bugs no single fuzzer finds well, an ensemble also mediates fuzzer variability, often (as here) ensuring that any faults are found about as quickly as by the \emph{best} of the individual fuzzers.  Note that Eclipser and Angora work well on the simple buggy run length encoder, but struggle with the more complex example.  Is it a good idea to use Eclipser?  Ensemble fuzzing lets a developer who just wants to find bugs avoid thinking about such problems.
+
+\section{Related Work}
+
+DeepState lies at the intersection of practical work on unit testing frameworks (e.g., JUnit or GoogleTest) and test generation research.  In particular, DeepState inherits from two approaches.  Parameterized unit testing \cite{ParamUnit,UnitMeister} argues that ``closed'' unit tests should be opened by providing a way to specify that some values are to be filled in by a tool.  DeepState extends this idea to allow the generation to be done via either fuzzers or symbolic execution tools, or simply by stored test cases.  Second, DeepState is fundamentally a property-based testing \cite{ClaessenH00,Hypothesis}  tool, and parameterized unit test specifications work much like those in any property-based testing tool for an imperative language.  The idea of a universal tool for automated test generation where the generation technology is a detail, not the focus, arises from efforts to test the Curiosity Mars Rover code at NASA/JPL \cite{AMAI,WODACommon,WODA08}.
+
+\section{Conclusions}
+
+DeepState is available as an open source tool on GitHub \url{https://github.com/trailofbits/deepstate}, and includes support for automatically building a docker environment with all supported fuzzers and symbolic execution tools installed.  The version used in the demonstration and in preparing this paper can be downloaded via {\tt docker pull agroce/deepstate\_demo:latest}.  With DeepState, every developer who knows how to write unit tests in C and C++ can take advantage of the power of modern fuzzers and symbolic execution tools.  Moreover, we believe that DeepState may be a useful basis for experiments comparing various fuzzers, as it provides a common semantics for tests, without forcing researchers to develop equivalent test harnesses.
+
+\bibliographystyle{plain}
+\bibliography{bibliography}
 
 \end{document}
