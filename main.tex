@@ -168,18 +168,55 @@ TEST(Runlength, EncodeDecode) \{
   \label{fig:example}
   \end{figure}
 
+  As Figure\ref{fig:example}, taken from an example in the DeepState repository, but omitting the actual (buggy) code for a runlength encoding shows, DeepState test harnesses look very much like the very widely used GoogleTest (\url{https://github.com/google/googletest}) framework.  The great difference is the use of DeepState API calls to replace fixed, concrete values with tool-generated values, and the use of more general, property-based-testing style, specifications to account for the variability of test data.  Here, the ``work'' is done by {\tt DeepState\_CStrUpToLen}, which takes a maximum string length and (optionally) an alphabet to use, and generates (and manages memory for) string inputs.  DeepState similarly provides APIs for all common C/C++ base types, including generation of values in ranges.
+
+Once such a harness is written, test generation is easy.  Simply compiling the test and linking with the DeepState binary, via a command such as {\tt clang++ -o runlen Runlen.cpp -ldeepstate} allows a user to use symbolic execution via Manticore \cite{mossberg2019manticore}, the Eclipser fuzzer \cite{choi:icse:2019}, afl in QEMU mode, or DeepState's built-in dumb (but very fast) fuzzer:
+
+  {\scriptsize
+\begin{code}
+> deepstate-manticore ./runlen --output\_test\_dir manticore\_symex
+...
+> deepstate-eclipser ./runlen --output\_test\_dir eclipser\_fuzzing
+...
+> ./runlen --fuzz --output\_test\_dir bruteforce\_fuzzing
+...
+\end{code}
+}
+
+Fuzzing with afl or another fuzzer requiring compile-time instrumentation is only slightly more difficult:
+
+{\scriptsize
+\begin{code}
+> deepstate-afl --compile\_test ./Runlen.cpp --out\_test\_name runlen
+...
+> deepstate-afl ./runlen.afl --fuzzer\_out --output\_test\_dir afl\_fuzzing
+\end{code}
+}
+
 \begin{figure}
 {\scriptsize
 \begin{code}
-
+    OneOf(
+	  [\&] \{MakeNewPath(path);
+            r = tfs\_mkdir(sb, path);
+            LOG(TRACE) << "tfs\_mkdir(sb, \"" << path << "\") = " << r;
+	  \},
+	  [\&] \{MakeNewPath(path);
+            r = tfs\_rmdir(sb, path);
+            LOG(TRACE) << "tfs\_rmdir(sb, \"" << path << "\") = " << r;
+	  \},
+	  [\&] \{r = tfs\_ls(sb);
+            LOG(TRACE) << "tfs\_ls(sb) = " << r;
+	  \},
+   ...
 \end{code}
 }
-  \caption{A Simple DeepState Test Harness}
-  \label{fig:example}
+  \caption{OneOf in Action}
+  \label{fig:oneof}
   \end{figure}
 
 
-A major feature of the DeepState API not shown in this simple example is the {\tt OneOf} construct, which takes as parameter a vector, array, string, or an arbitrary number of C++ lambdas.  In the first three cases, it returns a nondetermnistic element of the sequence; for lambdas, it selects and executes one of the code choices.  This makes the basic ``choose and run one option'' structure of API call sequence testing trivial to implement.  For an extended example of this in use see \url{https://github.com/agroce/testleveldb/blob/master/DiffTestDBs.cpp}, a DeepState harness for differential testing of Google's leveldb and Facebook's rocksdb.
+A major feature of the DeepState API not shown in the first example is the {\tt OneOf} construct, which takes as parameter a vector, array, string, or an arbitrary number of C++ lambdas.  In the first three cases, it returns a nondetermnistic element of the sequence; for lambdas, it selects and executes one of the code choices.  This makes the basic ``choose and run one option'' structure of API call sequence testing trivial to implement.  Figure~\ref{fig:oneof} shows use of OneOf in a harness for testing a file system developed at U. Toronto \cite{testfs}.  For an extended example of {\tt OneOf} see the TestFS harness (\url{https://github.com/agroce/testfs}) or a DeepState harness for differential testing of Google's leveldb and Facebook's rocksdb \url{https://github.com/agroce/testleveldb}.  Behind the scenes, the alphabet parameter to {\tt DeepState\_CstrUpToLen} also operates as a {\tt OneOf}, which means that swarm testing (see below) and other {\tt OneOf} semantics automatically are used when producing restricted-alphabet strings.
   
 \section{Supported Fuzzers and Back Ends}
 
